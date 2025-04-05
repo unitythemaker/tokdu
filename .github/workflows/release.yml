@@ -1,4 +1,7 @@
-name: Create Release from Tag
+name: Create Release from Tag with Changelog
+
+permissions:
+  contents: write
 
 on:
   push:
@@ -11,5 +14,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate Changelog
+        id: changelog
+        uses: metcalfc/changelog-generator@v4.5.0
       - name: Release
         uses: softprops/action-gh-release@v2
+        with:
+          body: |
+            ## Changes in this Release
+            ${{ steps.changelog.outputs.changelog }}
+          generate_release_notes: true
