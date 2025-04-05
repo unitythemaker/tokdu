@@ -2,7 +2,7 @@
 
 `tokdu` (Token Disk Usage) is a terminal-based utility that helps you analyze and visualize token usage in your codebase. Similar to the classic `du` (disk usage) command, tokdu shows you how many tokens your files and directories consume, which is essential when working with Large Language Models (LLMs) that have token limits.
 
-[![tokdu demonstration](assets/tokdu-demo.gif)](assets/tokdu-demo.mp4)
+[![tokdu demonstration](https://github.com/unitythemaker/tokdu/blob/main/assets/tokdu-demo.gif?raw=true)](https://github.com/unitythemaker/tokdu/blob/main/assets/tokdu-demo.mp4)
 
 ## Features
 
