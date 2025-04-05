@@ -240,6 +240,9 @@ def tui(stdscr, start_path, encoding_name, model_name):
 
     selected_idx = 0
     offset = 0
+    last_flash_time = 0
+    flash_cooldown = 1.0  # Seconds to wait before flashing again
+    root_message = ""  # Message to display when at root boundary
 
     while True:
         items = cached_scan_directory(current_path, encoder, git_spec, repo_root)
@@ -249,6 +252,15 @@ def tui(stdscr, start_path, encoding_name, model_name):
         max_items = height - 2
         offset = draw_menu(stdscr, items, selected_idx, current_path, offset, scanning)
 
+        # Display root boundary message if present
+        if root_message:
+            message_y = height - 1 if height > 2 else 0
+            stdscr.addstr(message_y, 0, root_message[:width-1], curses.A_BOLD)
+            stdscr.refresh()
+            # Auto-clear message after a brief period
+            if time.time() - last_flash_time > 2.0:
+                root_message = ""
+
         key = stdscr.getch()
         if key == -1:
             time.sleep(0.1)
@@ -257,17 +269,22 @@ def tui(stdscr, start_path, encoding_name, model_name):
         if key in (ord('q'), ord('Q')):
             break
         elif key in (curses.KEY_UP, ord('k')):
+            root_message = ""  # Clear message on navigation
             if selected_idx > 0:
                 selected_idx -= 1
         elif key in (curses.KEY_DOWN, ord('j')):
+            root_message = ""
             if items and selected_idx < len(items) - 1:
                 selected_idx += 1
         elif key == curses.KEY_NPAGE:  # Page Down
+            root_message = ""
             if items:
                 selected_idx = min(len(items) - 1, selected_idx + max_items)
         elif key == curses.KEY_PPAGE:  # Page Up
+            root_message = ""
             selected_idx = max(0, selected_idx - max_items)
         elif key in (curses.KEY_ENTER, 10, 13):  # Enter key
+            root_message = ""
             if items:
                 chosen = items[selected_idx]
                 if chosen['is_dir']:
@@ -276,14 +293,22 @@ def tui(stdscr, start_path, encoding_name, model_name):
                     selected_idx = 0
                     offset = 0
         elif key in (curses.KEY_BACKSPACE, 127, 8):
+            current_time = time.time()
             # Prevent navigating above the starting directory.
             if current_path == root_dir:
-                curses.flash()
+                if current_time - last_flash_time > flash_cooldown:
+                    curses.flash()
+                    root_message = "Root directory reached. Cannot navigate further up."
+                    last_flash_time = current_time
             else:
                 parent = os.path.dirname(current_path)
                 if os.path.commonpath([root_dir, parent]) != root_dir:
-                    curses.flash()
+                    if current_time - last_flash_time > flash_cooldown:
+                        curses.flash()
+                        root_message = "Root directory reached. Cannot navigate further up."
+                        last_flash_time = current_time
                 else:
+                    root_message = ""
                     history.append(current_path)
                     current_path = parent
                     selected_idx = 0

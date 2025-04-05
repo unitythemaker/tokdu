@@ -1,0 +1,1 @@
+from .tokdu import main
