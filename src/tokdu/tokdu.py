@@ -26,14 +26,41 @@ def find_git_root(starting_dir):
         current = os.path.dirname(current)
     return starting_dir
 
-def load_gitignore(git_root):
-    gitignore_path = os.path.join(git_root, '.gitignore')
-    if os.path.exists(gitignore_path):
-        with open(gitignore_path, 'r', encoding='utf-8', errors='ignore') as f:
-            patterns = f.readlines()
-        spec = pathspec.PathSpec.from_lines('gitwildmatch', patterns)
-    else:
-        spec = pathspec.PathSpec.from_lines('gitwildmatch', [])
+def load_gitignore(git_root, current_dir):
+    """
+    Load .gitignore files from git_root up to and including current_dir.
+    Patterns in deeper directories override those in parent directories,
+    matching Git's actual behavior.
+    """
+    git_root = os.path.abspath(git_root)
+    current_dir = os.path.abspath(current_dir)
+
+    # Collect all directories from git_root to current_dir
+    directories = []
+    path = current_dir
+    while os.path.commonpath([path, git_root]) == git_root:
+        directories.append(path)
+        if path == git_root:
+            break
+        path = os.path.dirname(path)
+
+    # Process directories from root to current (so deeper patterns override parent patterns)
+    directories.reverse()
+
+    # Collect all patterns
+    all_patterns = []
+    for directory in directories:
+        gitignore_path = os.path.join(directory, '.gitignore')
+        if os.path.exists(gitignore_path):
+            try:
+                with open(gitignore_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    patterns = f.readlines()
+                    all_patterns.extend(patterns)
+            except Exception:
+                pass  # Skip if we can't read the file
+
+    # Create spec with all collected patterns
+    spec = pathspec.PathSpec.from_lines('gitwildmatch', all_patterns)
     return spec
 
 def is_binary(filepath):
@@ -231,7 +258,6 @@ def tui(stdscr, start_path, encoding_name, model_name):
 
     encoder = get_encoder(encoding_name, model_name)
     repo_root = find_git_root(start_path)
-    git_spec = load_gitignore(repo_root)
 
     # Save the absolute starting directory.
     root_dir = os.path.abspath(start_path)
@@ -245,6 +271,9 @@ def tui(stdscr, start_path, encoding_name, model_name):
     root_message = ""  # Message to display when at root boundary
 
     while True:
+        # Load or reload gitignore for the current directory
+        git_spec = load_gitignore(repo_root, current_path)
+
         items = cached_scan_directory(current_path, encoder, git_spec, repo_root)
         scanning = items is None
 
