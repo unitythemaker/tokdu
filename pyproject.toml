@@ -21,6 +21,9 @@ classifiers = [
 ]
 dependencies = ["tiktoken==0.9.0", "pathspec==0.12.1"]
 
+[project.optional-dependencies]
+gemini = ["google-cloud-aiplatform[tokenization]>=1.87.0"]
+
 [project.urls]
 Homepage = "https://github.com/unitythemaker/tokdu"
 

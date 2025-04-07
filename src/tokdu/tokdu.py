@@ -4,7 +4,6 @@ import sys
 import curses
 import argparse
 import time
-import tiktoken
 import pathspec
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -73,24 +72,67 @@ def is_binary(filepath):
         return True
     return False
 
-def get_encoder(encoding_name=None, model_name=None):
-    if encoding_name:
-        try:
-            return tiktoken.get_encoding(encoding_name)
-        except Exception:
-            pass
+def get_encoder(encoding_name=None, model_name=None, tokenizer_type=None):
+    """
+    Get a tokenizer based on the specified parameters.
 
-    if model_name:
-        try:
-            return tiktoken.encoding_for_model(model_name)
-        except Exception:
-            pass
+    Args:
+        encoding_name: The name of a tiktoken encoding
+        model_name: The name of a model (OpenAI or Gemini)
+        tokenizer_type: The type of tokenizer to use ('tiktoken' or 'gemini')
 
-    # Fallbacks
+    Returns:
+        A tokenizer object with a compatible interface
+    """
+    # Try to use Gemini tokenizer if specified
+    if tokenizer_type == 'gemini':
+        try:
+            from vertexai.preview import tokenization
+            # Adapter class to provide a compatible interface with tiktoken
+            class GeminiTokenizerAdapter:
+                def __init__(self, model_name):
+                    self.tokenizer = tokenization.get_tokenizer_for_model(model_name)
+
+                def encode(self, text):
+                    # Return a list-like object with a length (just for token counting)
+                    result = self.tokenizer.count_tokens(text)
+                    # Create a list of the appropriate length for counting
+                    return [0] * result.total_tokens
+
+            gemini_model = model_name if model_name else "gemini-1.5-flash-001"
+            return GeminiTokenizerAdapter(gemini_model)
+        except ImportError:
+            print("Warning: Gemini tokenization requested but vertexai package not installed.")
+            print("Install with: pip install google-cloud-aiplatform[tokenization]>=1.57.0")
+            # Fall through to tiktoken options
+
+    # Use tiktoken if specified or as fallback
     try:
-        return tiktoken.get_encoding("o200k_base")
-    except Exception:
-        return tiktoken.encoding_for_model("gpt-4o")
+        import tiktoken
+
+        if encoding_name:
+            try:
+                return tiktoken.get_encoding(encoding_name)
+            except Exception:
+                pass
+
+        if model_name and tokenizer_type != 'gemini':
+            try:
+                return tiktoken.encoding_for_model(model_name)
+            except Exception:
+                pass
+
+        # Fallbacks
+        try:
+            return tiktoken.get_encoding("o200k_base")
+        except Exception:
+            return tiktoken.encoding_for_model("gpt-4o")
+
+    except ImportError:
+        print("Error: Neither tiktoken nor vertexai are installed.")
+        print("Install tiktoken with: pip install tiktoken")
+        print("Or install Gemini tokenizers with: pip install google-cloud-aiplatform[tokenization]>=1.57.0")
+        sys.exit(1)
 
 def count_tokens_in_file(filepath, encoder):
     if is_binary(filepath):
@@ -248,7 +290,7 @@ def draw_menu(stdscr, items, selected_idx, current_path, offset, scanning):
     stdscr.refresh()
     return offset
 
-def tui(stdscr, start_path, encoding_name, model_name):
+def tui(stdscr, start_path, encoding_name, model_name, tokenizer_type):
     curses.curs_set(0)
     stdscr.nodelay(True)  # Enable non-blocking input.
     if curses.has_colors():
@@ -256,7 +298,7 @@ def tui(stdscr, start_path, encoding_name, model_name):
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_CYAN)
 
-    encoder = get_encoder(encoding_name, model_name)
+    encoder = get_encoder(encoding_name, model_name, tokenizer_type)
     repo_root = find_git_root(start_path)
 
     # Save the absolute starting directory.
@@ -353,18 +395,26 @@ def main():
         "directory", nargs="?", default=".",
         help="Directory to start in (default: current directory)"
     )
-    parser.add_argument(
+
+    # Create a group for tokenizer options
+    tokenizer_group = parser.add_argument_group('Tokenizer Options')
+    tokenizer_group.add_argument(
         "--encoding", "-e", dest="encoding_name",
         help="Tiktoken encoding name (e.g., 'cl100k_base', 'o200k_base')"
     )
-    parser.add_argument(
+    tokenizer_group.add_argument(
         "--model", "-m", dest="model_name",
-        help="Model name for tokenization (e.g., 'gpt-3.5-turbo', 'gpt-4o')"
+        help="Model name for tokenization (e.g., 'gpt-3.5-turbo', 'gpt-4o', 'gemini-1.5-flash-001')"
     )
+    tokenizer_group.add_argument(
+        "--tokenizer", "-t", dest="tokenizer_type", choices=['tiktoken', 'gemini'], default='tiktoken',
+        help="Tokenizer backend to use (default: tiktoken)"
+    )
+
     args = parser.parse_args()
 
     try:
-        curses.wrapper(tui, args.directory, args.encoding_name, args.model_name)
+        curses.wrapper(tui, args.directory, args.encoding_name, args.model_name, args.tokenizer_type)
     except KeyboardInterrupt:
         sys.exit(0)
     except Exception as e:

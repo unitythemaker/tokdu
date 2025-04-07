@@ -11,12 +11,19 @@
 - 🔍 Respects `.gitignore` rules
 - ⏩ Skips binary files automatically
 - 🧩 Uses OpenAI's `tiktoken` for accurate token counting
+- 🔄 Supports Google's Gemini local tokenization
 - 🎛️ Support for different models' tokenizers
 
 ## Installation
 
 ```bash
 pip install tokdu
+```
+
+For Gemini tokenization support:
+
+```bash
+pip install "tokdu[gemini]"
 ```
 
 Or install from source:
@@ -43,7 +50,9 @@ Specify a starting directory:
 tokdu /path/to/project
 ```
 
-Use a specific tokenizer encoding:
+### Tokenizer Options
+
+Use a specific tiktoken encoding:
 
 ```bash
 tokdu --encoding cl100k_base
@@ -53,6 +62,12 @@ Use tokenization based on a specific model:
 
 ```bash
 tokdu --model gpt-4o
+```
+
+Use Google's Gemini tokenizer:
+
+```bash
+tokdu --tokenizer gemini --model gemini-1.5-flash-001
 ```
 
 ## Navigation Controls
@@ -65,16 +80,22 @@ tokdu --model gpt-4o
 
 ## Why Count Tokens?
 
-Large Language Models like GPT-4o have context window limits measured in tokens. When embedding code in prompts or using tools and IDEs like GitHub Copilot or Zed, understanding your project's token usage helps you:
+Large Language Models like GPT-4o and Gemini have context window limits measured in tokens. When embedding code in prompts or using tools and IDEs like GitHub Copilot or Zed, understanding your project's token usage helps you:
 
 - Stay within context window limits
 - Optimize prompts for LLMs
 - Identify areas to trim when sharing code with AI assistants
 
+## Tokenizer Support
+
+- **OpenAI Tiktoken**: Used for OpenAI models (GPT-3.5, GPT-4, etc.)
+- **Google Gemini**: Local tokenization for Gemini models (requires `google-cloud-aiplatform[tokenization]>=1.57.0`)
+
 ## Technical Details
 
-- Uses OpenAI's `tiktoken` library for accurate token counting
-- Tokenizers can be specified with either `--encoding` or `--model` flags
+- Uses OpenAI's `tiktoken` library for accurate token counting with OpenAI models
+- Supports Google's Vertex AI SDK for local Gemini tokenization
+- Tokenizers can be specified with `--encoding`, `--model`, or `--tokenizer` flags
 - Defaults to `o200k_base` encoding or `gpt-4o` model when not specified
 - Scans directories asynchronously for better performance
 - Caches results to avoid repeated scans
@@ -82,9 +103,10 @@ Large Language Models like GPT-4o have context window limits measured in tokens.
 ## Requirements
 
 - Python 3
-- tiktoken
 - pathspec
 - curses (built into Python standard library)
+- tiktoken
+- google-cloud-aiplatform[tokenization] (optional, for Gemini tokenization) - requires cmake to be installed
 
 ## License
 
