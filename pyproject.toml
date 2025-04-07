@@ -7,7 +7,7 @@ package-dir = { "" = "src" }
 
 [project]
 name = "tokdu"
-version = "0.1.3"
+version = "0.1.4"
 description = "A token counting TUI tool that respects .gitignore and skips binary files"
 readme = "README.md"
 authors = [
@@ -19,10 +19,10 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Operating System :: OS Independent",
 ]
-dependencies = ["tiktoken==0.9.0", "pathspec==0.12.1"]
+dependencies = ["tiktoken==0.9.0", "pathspec==0.12.1", "appdirs>=1.4.4"]
 
 [project.optional-dependencies]
-gemini = ["google-cloud-aiplatform[tokenization]>=1.87.0"]
+gemini = ["google-cloud-aiplatform[tokenization]>=1.57.0"]
 
 [project.urls]
 Homepage = "https://github.com/unitythemaker/tokdu"

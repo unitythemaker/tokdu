@@ -7,6 +7,7 @@ import time
 import pathspec
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from . import config
 
 # Global cache for directory scans: path -> either list of items or Future.
 scan_cache = {}
@@ -84,6 +85,22 @@ def get_encoder(encoding_name=None, model_name=None, tokenizer_type=None):
     Returns:
         A tokenizer object with a compatible interface
     """
+    # Load defaults from config if values not provided
+    if tokenizer_type is None:
+        tokenizer_type = config.get_config_value('tokenizer', 'type', 'tiktoken')
+
+    # If neither encoding_name nor model_name is provided, load from config
+    # respecting the mutual exclusivity (one of them will be empty)
+    if encoding_name is None and model_name is None:
+        encoding_name = config.get_config_value('tokenizer', 'encoding', '')
+        model_name = config.get_config_value('tokenizer', 'model', 'gpt-4o')
+
+        # Ensure empty string is treated as None
+        if encoding_name == '':
+            encoding_name = None
+        if model_name == '':
+            model_name = None
+
     # Try to use Gemini tokenizer if specified
     if tokenizer_type == 'gemini':
         try:
@@ -133,7 +150,6 @@ def get_encoder(encoding_name=None, model_name=None, tokenizer_type=None):
         print("Install tiktoken with: pip install tiktoken")
         print("Or install Gemini tokenizers with: pip install google-cloud-aiplatform[tokenization]>=1.57.0")
         sys.exit(1)
-
 def count_tokens_in_file(filepath, encoder):
     if is_binary(filepath):
         return 0
@@ -385,19 +401,55 @@ def tui(stdscr, start_path, encoding_name, model_name, tokenizer_type):
                     selected_idx = 0
                     offset = 0
 
+# ---------------- Configuration Commands ----------------
+
+def handle_config_command(args):
+    """Handle the config subcommand."""
+    if args.show:
+        config.print_config()
+        return
+
+    # Set tokenizer type
+    if args.tokenizer_type:
+        config.set_config_value('tokenizer', 'type', args.tokenizer_type)
+        print(f"Default tokenizer type set to: {args.tokenizer_type}")
+
+    # Set model (will clear encoding)
+    if args.model_name:
+        cleared = config.set_config_value('tokenizer', 'model', args.model_name)
+        print(f"Default model set to: {args.model_name}")
+        if cleared:
+            print(f"Note: '{cleared}' setting has been cleared since it's mutually exclusive with 'model'")
+
+    # Set encoding (will clear model)
+    if args.encoding_name:
+        cleared = config.set_config_value('tokenizer', 'encoding', args.encoding_name)
+        print(f"Default encoding set to: {args.encoding_name}")
+        if cleared:
+            print(f"Note: '{cleared}' setting has been cleared since it's mutually exclusive with 'encoding'")
+
+    # If no options were provided, show the current configuration
+    if not (args.tokenizer_type or args.model_name or args.encoding_name):
+        config.print_config()
+
 # ---------------- Main Entry ----------------
 
 def main():
     parser = argparse.ArgumentParser(
         description="Tokdu: A token counting TUI tool (respects .gitignore, skips binary files)."
     )
-    parser.add_argument(
+
+    # Create subparsers for different commands
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+
+    # Default command (scan)
+    scan_parser = subparsers.add_parser('scan', help='Scan and analyze token usage (default command)')
+    scan_parser.add_argument(
         "directory", nargs="?", default=".",
         help="Directory to start in (default: current directory)"
     )
 
-    # Create a group for tokenizer options
-    tokenizer_group = parser.add_argument_group('Tokenizer Options')
+    tokenizer_group = scan_parser.add_argument_group('Tokenizer Options')
     tokenizer_group.add_argument(
         "--encoding", "-e", dest="encoding_name",
         help="Tiktoken encoding name (e.g., 'cl100k_base', 'o200k_base')"
@@ -407,18 +459,77 @@ def main():
         help="Model name for tokenization (e.g., 'gpt-3.5-turbo', 'gpt-4o', 'gemini-1.5-flash-001')"
     )
     tokenizer_group.add_argument(
-        "--tokenizer", "-t", dest="tokenizer_type", choices=['tiktoken', 'gemini'], default='tiktoken',
-        help="Tokenizer backend to use (default: tiktoken)"
+        "--tokenizer", "-t", dest="tokenizer_type", choices=['tiktoken', 'gemini'],
+        help="Tokenizer backend to use (default from config or 'tiktoken')"
+    )
+
+    # Config command
+    config_parser = subparsers.add_parser('config', help='View or set configuration options')
+    config_parser.add_argument(
+        "--show", action="store_true",
+        help="Show current configuration"
+    )
+    config_parser.add_argument(
+        "--tokenizer", dest="tokenizer_type", choices=['tiktoken', 'gemini'],
+        help="Set default tokenizer type"
+    )
+    config_parser.add_argument(
+        "--model", "-m", dest="model_name",
+        help="Set default model name"
+    )
+    config_parser.add_argument(
+        "--encoding", "-e", dest="encoding_name",
+        help="Set default tiktoken encoding name"
+    )
+
+    # Also support directory as a positional argument without subcommand for backward compatibility
+    parser.add_argument(
+        "directory_compat", nargs="?", default=None,
+        help=argparse.SUPPRESS  # Hidden parameter for backward compatibility
+    )
+
+    # Add tokenizer options to the main parser for backward compatibility
+    parser.add_argument(
+        "--encoding", "-e", dest="encoding_name_compat",
+        help=argparse.SUPPRESS  # Hidden parameter for backward compatibility
+    )
+    parser.add_argument(
+        "--model", "-m", dest="model_name_compat",
+        help=argparse.SUPPRESS  # Hidden parameter for backward compatibility
+    )
+    parser.add_argument(
+        "--tokenizer", "-t", dest="tokenizer_type_compat", choices=['tiktoken', 'gemini'],
+        help=argparse.SUPPRESS  # Hidden parameter for backward compatibility
     )
 
     args = parser.parse_args()
 
-    try:
-        curses.wrapper(tui, args.directory, args.encoding_name, args.model_name, args.tokenizer_type)
-    except KeyboardInterrupt:
-        sys.exit(0)
-    except Exception as e:
-        sys.exit(str(e))
+    # Handle backward compatibility for no subcommand
+    if not args.command and (args.directory_compat is not None or
+                            args.encoding_name_compat is not None or
+                            args.model_name_compat is not None or
+                            args.tokenizer_type_compat is not None):
+        args.command = 'scan'
+        args.directory = args.directory_compat or "."
+        args.encoding_name = args.encoding_name_compat
+        args.model_name = args.model_name_compat
+        args.tokenizer_type = args.tokenizer_type_compat
+
+    # Handle the command
+    if args.command == 'config':
+        handle_config_command(args)
+    else:  # Default to 'scan' command if no command provided
+        try:
+            directory = args.directory if hasattr(args, 'directory') else "."
+            encoding_name = getattr(args, 'encoding_name', None)
+            model_name = getattr(args, 'model_name', None)
+            tokenizer_type = getattr(args, 'tokenizer_type', None)
+
+            curses.wrapper(tui, directory, encoding_name, model_name, tokenizer_type)
+        except KeyboardInterrupt:
+            sys.exit(0)
+        except Exception as e:
+            sys.exit(str(e))
 
 if __name__ == "__main__":
     main()

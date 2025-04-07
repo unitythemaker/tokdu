@@ -13,6 +13,7 @@
 - 🧩 Uses OpenAI's `tiktoken` for accurate token counting
 - 🔄 Supports Google's Gemini local tokenization
 - 🎛️ Support for different models' tokenizers
+- ⚙️ Cross-platform configuration system
 
 ## Installation
 
@@ -50,6 +51,12 @@ Specify a starting directory:
 tokdu /path/to/project
 ```
 
+Using the explicit scan command:
+
+```bash
+tokdu scan /path/to/project
+```
+
 ### Tokenizer Options
 
 Use a specific tiktoken encoding:
@@ -69,6 +76,39 @@ Use Google's Gemini tokenizer:
 ```bash
 tokdu --tokenizer gemini --model gemini-1.5-flash-001
 ```
+
+### Configuration
+
+View current configuration:
+
+```bash
+tokdu config --show
+```
+
+Set default tokenizer type:
+
+```bash
+tokdu config --tokenizer gemini
+```
+
+Set default model (will clear any encoding setting):
+
+```bash
+tokdu config --model gemini-1.5-flash-001
+```
+
+Set default encoding (will clear any model setting):
+
+```bash
+tokdu config --encoding cl100k_base
+```
+
+**Note:** The `model` and `encoding` settings are mutually exclusive. Setting one will automatically clear the other to avoid confusion about which one takes precedence.
+
+Configuration is stored in a platform-specific location:
+- Windows: `C:\Users\<Username>\AppData\Local\tokdu\config.ini`
+- macOS: `~/Library/Application Support/tokdu/config.ini`
+- Linux: `~/.config/tokdu/config.ini`
 
 ## Navigation Controls
 
@@ -96,7 +136,8 @@ Large Language Models like GPT-4o and Gemini have context window limits measured
 - Uses OpenAI's `tiktoken` library for accurate token counting with OpenAI models
 - Supports Google's Vertex AI SDK for local Gemini tokenization
 - Tokenizers can be specified with `--encoding`, `--model`, or `--tokenizer` flags
-- Defaults to `o200k_base` encoding or `gpt-4o` model when not specified
+- Uses `appdirs` to manage cross-platform configuration
+- Defaults to values from config file, or `tiktoken` and `gpt-4o` if not configured
 - Scans directories asynchronously for better performance
 - Caches results to avoid repeated scans
 
@@ -104,9 +145,10 @@ Large Language Models like GPT-4o and Gemini have context window limits measured
 
 - Python 3
 - pathspec
+- appdirs
 - curses (built into Python standard library)
 - tiktoken
-- google-cloud-aiplatform[tokenization] (optional, for Gemini tokenization) - requires cmake to be installed
+- google-cloud-aiplatform[tokenization] (optional, for Gemini tokenization; requires cmake) - requires cmake to be installed
 
 ## License
 
