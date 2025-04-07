@@ -23,6 +23,7 @@ dependencies = ["tiktoken==0.9.0", "pathspec==0.12.1", "appdirs>=1.4.4"]
 
 [project.optional-dependencies]
 gemini = ["google-cloud-aiplatform[tokenization]>=1.57.0"]
+anthropic = ["anthropic>=0.49.0"]
 
 [project.urls]
 Homepage = "https://github.com/unitythemaker/tokdu"

@@ -16,7 +16,26 @@ cache_lock = threading.Lock()
 # Global executor for asynchronous scanning.
 scan_executor = ThreadPoolExecutor(max_workers=4)
 
+# Flag to track whether curses has been initialized
+curses_initialized = False
+
 # ---------------- Utility Functions ----------------
+
+def clean_exit_with_message(message, code=1):
+    """
+    Safely cleans up curses and exits with an error message.
+
+    Args:
+        message: The error message to display
+    """
+    global curses_initialized
+    if curses_initialized:
+        try:
+            curses.endwin()
+        except Exception:
+            pass
+    print(f"{message}")
+    sys.exit(code)
 
 def find_git_root(starting_dir):
     current = os.path.abspath(starting_dir)
@@ -79,8 +98,8 @@ def get_encoder(encoding_name=None, model_name=None, tokenizer_type=None):
 
     Args:
         encoding_name: The name of a tiktoken encoding
-        model_name: The name of a model (OpenAI or Gemini)
-        tokenizer_type: The type of tokenizer to use ('tiktoken' or 'gemini')
+        model_name: The name of a model (OpenAI, Gemini, or Anthropic)
+        tokenizer_type: The type of tokenizer to use ('tiktoken', 'gemini', or 'anthropic')
 
     Returns:
         A tokenizer object with a compatible interface
@@ -101,6 +120,125 @@ def get_encoder(encoding_name=None, model_name=None, tokenizer_type=None):
         if model_name == '':
             model_name = None
 
+    # Try to use Anthropic tokenizer if specified
+    if tokenizer_type == 'anthropic':
+        try:
+            import anthropic
+
+            # Get API key from config or environment variable
+            anthropic_api_key = config.get_config_value('tokenizer', 'anthropic_api_key', '') or os.environ.get('ANTHROPIC_API_KEY', '')
+
+            if not anthropic_api_key:
+                print("Warning: Anthropic tokenization requires an API key.")
+                print("Set it via ANTHROPIC_API_KEY environment variable or configuration.")
+
+                # Ask for permission to use the API
+                permission = input("Anthropic token counting requires API calls. Do you want to proceed? (y/n): ")
+                if permission.lower() not in ('y', 'yes'):
+                    print("Anthropic tokenization aborted.")
+                    sys.exit(1)
+                else:
+                    # Ask for API key
+                    anthropic_api_key = input("Enter your Anthropic API key: ")
+                    save_key = input("Save this key to configuration? (y/n): ")
+                    if save_key.lower() in ('y', 'yes'):
+                        config.set_config_value('tokenizer', 'anthropic_api_key', anthropic_api_key)
+
+            if anthropic_api_key and tokenizer_type == 'anthropic':
+                # Adapter class to provide a compatible interface
+                class AnthropicTokenizerAdapter:
+                    def __init__(self, model_name, api_key):
+                        self.client = anthropic.Anthropic(api_key=api_key)
+                        self.model = model_name if model_name else "claude-3-haiku-20240307"
+
+                        # Retry parameters
+                        self.max_retries = 5
+                        self.base_backoff = 1.0  # Base backoff in seconds
+
+                        # Error tracking
+                        self.error_count = 0
+                        self.max_errors = 3
+                        self.error_reset_time = 300  # 5 minutes
+                        self.last_error_time = 0
+
+                        # Rate limiting parameters
+                        self.rate_limited = False
+                        self.last_rate_limit_warning = 0
+                        self.warning_interval = 60  # Only warn about rate limits once per minute
+
+                    def encode(self, text):
+                        # Don't make API calls for empty texts
+                        if not text.strip():
+                            return []
+
+                        # Reset error count if it's been a while since the last error
+                        current_time = time.time()
+                        if current_time - self.last_error_time > self.error_reset_time:
+                            self.error_count = 0
+
+                        # Retry logic with exponential backoff
+                        retries = 0
+                        backoff = self.base_backoff
+
+                        while retries <= self.max_retries:
+                            try:
+                                # Call the token counting API
+                                response = self.client.messages.count_tokens(
+                                    model=self.model,
+                                    messages=[
+                                        {"role": "user", "content": text}
+                                    ]
+                                )
+                                # Successful response, reset rate limit flag
+                                self.rate_limited = False
+                                self.error_count = 0
+                                # Create a list of the appropriate length for counting
+                                return [0] * response.input_tokens
+
+                            except anthropic.RateLimitError:
+                                # Special handling for rate limit errors
+                                retries += 1
+                                if retries <= self.max_retries:
+                                    # Sleep with exponential backoff before retrying
+                                    time.sleep(backoff)
+                                    backoff *= 2  # Exponential backoff
+                                else:
+                                    # Out of retries for rate limiting
+                                    current_time = time.time()
+                                    if current_time - self.last_rate_limit_warning > self.warning_interval:
+                                        print(f"Anthropic API rate limit reached after {retries} retries. Token counts will be temporarily unavailable.")
+                                        self.last_rate_limit_warning = current_time
+                                    self.rate_limited = True
+                                    return []
+
+                            except Exception as e:
+                                # Handle other errors
+                                self.error_count += 1
+                                self.last_error_time = current_time
+
+                                # If we've had too many errors, exit the program
+                                if self.error_count >= self.max_errors:
+                                    clean_exit_with_message(f"Anthropic API error threshold exceeded ({self.error_count} errors). Last error: {e}")
+
+                                # If we still have retries, try again
+                                retries += 1
+                                if retries <= self.max_retries:
+                                    time.sleep(backoff)
+                                    backoff *= 2  # Exponential backoff
+                                else:
+                                    # Out of retries, exit with error
+                                    clean_exit_with_message(f"Error counting tokens with Anthropic API after {retries} attempts: {e}")
+
+                        # Should not reach here, but just in case
+                        return []
+
+                return AnthropicTokenizerAdapter(model_name, anthropic_api_key)
+
+        except ImportError:
+            print("Error: Anthropic tokenization requested but anthropic package not installed.")
+            print("Install with: pip install anthropic")
+            sys.exit(1)
+
     # Try to use Gemini tokenizer if specified
     if tokenizer_type == 'gemini':
         try:
@@ -116,12 +254,12 @@ def get_encoder(encoding_name=None, model_name=None, tokenizer_type=None):
                     # Create a list of the appropriate length for counting
                     return [0] * result.total_tokens
 
-            gemini_model = model_name if model_name else "gemini-1.5-flash-001"
+            gemini_model = model_name if model_name else "gemini-2.0-flash"
             return GeminiTokenizerAdapter(gemini_model)
         except ImportError:
-            print("Warning: Gemini tokenization requested but vertexai package not installed.")
-            print("Install with: pip install google-cloud-aiplatform[tokenization]>=1.57.0")
-            # Fall through to tiktoken options
+            print("Error: Gemini tokenization requested but vertexai package not installed.")
+            print("Install with: pip install google-cloud-aiplatform[tokenization]")
+            sys.exit(1)
 
     # Use tiktoken if specified or as fallback
     try:
@@ -146,10 +284,10 @@ def get_encoder(encoding_name=None, model_name=None, tokenizer_type=None):
             return tiktoken.encoding_for_model("gpt-4o")
 
     except ImportError:
-        print("Error: Neither tiktoken nor vertexai are installed.")
-        print("Install tiktoken with: pip install tiktoken")
-        print("Or install Gemini tokenizers with: pip install google-cloud-aiplatform[tokenization]>=1.57.0")
+        print("Error: tiktoken not installed.")
+        print("Install with: pip install tiktoken")
         sys.exit(1)
+
 def count_tokens_in_file(filepath, encoder):
     if is_binary(filepath):
         return 0
@@ -306,16 +444,16 @@ def draw_menu(stdscr, items, selected_idx, current_path, offset, scanning):
     stdscr.refresh()
     return offset
 
-def tui(stdscr, start_path, encoding_name, model_name, tokenizer_type):
+def tui(stdscr, start_path, encoder, repo_root):
+    global curses_initialized
+    curses_initialized = True
+
     curses.curs_set(0)
     stdscr.nodelay(True)  # Enable non-blocking input.
     if curses.has_colors():
         curses.start_color()
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_CYAN)
-
-    encoder = get_encoder(encoding_name, model_name, tokenizer_type)
-    repo_root = find_git_root(start_path)
 
     # Save the absolute starting directory.
     root_dir = os.path.abspath(start_path)
@@ -459,7 +597,7 @@ def main():
         help="Model name for tokenization (e.g., 'gpt-3.5-turbo', 'gpt-4o', 'gemini-1.5-flash-001')"
     )
     tokenizer_group.add_argument(
-        "--tokenizer", "-t", dest="tokenizer_type", choices=['tiktoken', 'gemini'],
+        "--tokenizer", "-t", dest="tokenizer_type", choices=['tiktoken', 'gemini', 'anthropic'],
         help="Tokenizer backend to use (default from config or 'tiktoken')"
     )
 
@@ -470,7 +608,7 @@ def main():
         help="Show current configuration"
     )
     config_parser.add_argument(
-        "--tokenizer", dest="tokenizer_type", choices=['tiktoken', 'gemini'],
+        "--tokenizer", dest="tokenizer_type", choices=['tiktoken', 'gemini', 'anthropic'],
         help="Set default tokenizer type"
     )
     config_parser.add_argument(
@@ -498,7 +636,7 @@ def main():
         help=argparse.SUPPRESS  # Hidden parameter for backward compatibility
     )
     parser.add_argument(
-        "--tokenizer", "-t", dest="tokenizer_type_compat", choices=['tiktoken', 'gemini'],
+        "--tokenizer", "-t", dest="tokenizer_type_compat", choices=['tiktoken', 'gemini', 'anthropic'],
         help=argparse.SUPPRESS  # Hidden parameter for backward compatibility
     )
 
@@ -525,7 +663,18 @@ def main():
             model_name = getattr(args, 'model_name', None)
             tokenizer_type = getattr(args, 'tokenizer_type', None)
 
-            curses.wrapper(tui, directory, encoding_name, model_name, tokenizer_type)
+            # Initialize encoder and repo_root before starting curses
+            try:
+                encoder = get_encoder(encoding_name, model_name, tokenizer_type)
+                repo_root = find_git_root(directory)
+
+                # Now start curses with the pre-initialized encoder
+                curses.wrapper(lambda stdscr: tui(stdscr, directory, encoder, repo_root))
+            except ImportError as e:
+                # This captures the import errors without trying to use curses
+                print(str(e))
+                sys.exit(1)
+
         except KeyboardInterrupt:
             sys.exit(0)
         except Exception as e:

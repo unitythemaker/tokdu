@@ -12,6 +12,7 @@
 - ⏩ Skips binary files automatically
 - 🧩 Uses OpenAI's `tiktoken` for accurate token counting
 - 🔄 Supports Google's Gemini local tokenization
+- 🔮 Supports Anthropic's Claude API tokenization
 - 🎛️ Support for different models' tokenizers
 - ⚙️ Cross-platform configuration system
 
@@ -25,6 +26,12 @@ For Gemini tokenization support:
 
 ```bash
 pip install "tokdu[gemini]"
+```
+
+For Anthropic Claude tokenization support:
+
+```bash
+pip install "tokdu[anthropic]"
 ```
 
 Or install from source:
@@ -75,6 +82,12 @@ Use Google's Gemini tokenizer:
 
 ```bash
 tokdu --tokenizer gemini --model gemini-1.5-flash-001
+```
+
+Use Anthropic's Claude tokenizer (requires API key):
+
+```bash
+tokdu --tokenizer anthropic --model claude-3-haiku-20240307
 ```
 
 ### Configuration
@@ -130,11 +143,13 @@ Large Language Models like GPT-4o and Gemini have context window limits measured
 
 - **OpenAI Tiktoken**: Used for OpenAI models (GPT-3.5, GPT-4, etc.)
 - **Google Gemini**: Local tokenization for Gemini models (requires `google-cloud-aiplatform[tokenization]>=1.57.0`)
+- **Anthropic Claude**: API-based tokenization for Claude models (requires `anthropic>=0.7.0` and API key)
 
 ## Technical Details
 
 - Uses OpenAI's `tiktoken` library for accurate token counting with OpenAI models
 - Supports Google's Vertex AI SDK for local Gemini tokenization
+- Supports Anthropic's API for Claude model tokenization
 - Tokenizers can be specified with `--encoding`, `--model`, or `--tokenizer` flags
 - Uses `appdirs` to manage cross-platform configuration
 - Defaults to values from config file, or `tiktoken` and `gpt-4o` if not configured
@@ -149,6 +164,7 @@ Large Language Models like GPT-4o and Gemini have context window limits measured
 - curses (built into Python standard library)
 - tiktoken
 - google-cloud-aiplatform[tokenization] (optional, for Gemini tokenization; requires cmake) - requires cmake to be installed
+- anthropic (optional, for Claude tokenization)
 
 ## License
 
