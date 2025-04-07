@@ -624,7 +624,7 @@ def main():
         help="Show current configuration"
     )
     config_parser.add_argument(
-        "--tokenizer", dest="tokenizer_type", choices=['tiktoken', 'gemini', 'anthropic'],
+        "--tokenizer", "-t", dest="tokenizer_type", choices=['tiktoken', 'gemini', 'anthropic'],
         help="Set default tokenizer type"
     )
     config_parser.add_argument(
