@@ -102,7 +102,7 @@ def get_encoder(encoding_name=None, model_name=None, tokenizer_type=None):
         tokenizer_type: The type of tokenizer to use ('tiktoken', 'gemini', or 'anthropic')
 
     Returns:
-        A tokenizer object with a compatible interface
+        tuple: (encoder, tokenizer_info_string)
     """
     # Load defaults from config if values not provided
     if tokenizer_type is None:
@@ -232,7 +232,9 @@ def get_encoder(encoding_name=None, model_name=None, tokenizer_type=None):
                         # Should not reach here, but just in case
                         return []
 
-                return AnthropicTokenizerAdapter(model_name, anthropic_api_key)
+                actual_model = model_name if model_name else "claude-3-haiku-20240307"
+                tokenizer_info = f"Anthropic tokenizer (model: {actual_model})"
+                return AnthropicTokenizerAdapter(model_name, anthropic_api_key), tokenizer_info
 
         except ImportError:
             print("Error: Anthropic tokenization requested but anthropic package not installed.")
@@ -247,6 +249,7 @@ def get_encoder(encoding_name=None, model_name=None, tokenizer_type=None):
             class GeminiTokenizerAdapter:
                 def __init__(self, model_name):
                     self.tokenizer = tokenization.get_tokenizer_for_model(model_name)
+                    self.model_name = model_name
 
                 def encode(self, text):
                     # Return a list-like object with a length (just for token counting)
@@ -255,7 +258,8 @@ def get_encoder(encoding_name=None, model_name=None, tokenizer_type=None):
                     return [0] * result.total_tokens
 
             gemini_model = model_name if model_name else "gemini-2.0-flash"
-            return GeminiTokenizerAdapter(gemini_model)
+            tokenizer_info = f"Gemini tokenizer (model: {gemini_model})"
+            return GeminiTokenizerAdapter(gemini_model), tokenizer_info
         except ImportError:
             print("Error: Gemini tokenization requested but vertexai package not installed.")
             print("Install with: pip install google-cloud-aiplatform[tokenization]")
@@ -267,21 +271,25 @@ def get_encoder(encoding_name=None, model_name=None, tokenizer_type=None):
 
         if encoding_name:
             try:
-                return tiktoken.get_encoding(encoding_name)
+                tokenizer_info = f"tiktoken (encoding: {encoding_name})"
+                return tiktoken.get_encoding(encoding_name), tokenizer_info
             except Exception:
                 pass
 
         if model_name and tokenizer_type != 'gemini':
             try:
-                return tiktoken.encoding_for_model(model_name)
+                tokenizer_info = f"tiktoken (model: {model_name})"
+                return tiktoken.encoding_for_model(model_name), tokenizer_info
             except Exception:
                 pass
 
         # Fallbacks
         try:
-            return tiktoken.get_encoding("o200k_base")
+            tokenizer_info = "tiktoken (encoding: o200k_base)"
+            return tiktoken.get_encoding("o200k_base"), tokenizer_info
         except Exception:
-            return tiktoken.encoding_for_model("gpt-4o")
+            tokenizer_info = "tiktoken (model: gpt-4o)"
+            return tiktoken.encoding_for_model("gpt-4o"), tokenizer_info
 
     except ImportError:
         print("Error: tiktoken not installed.")
@@ -400,17 +408,22 @@ def progress_bar(percentage, bar_width):
 
 # ---------------- TUI Functions ----------------
 
-def draw_menu(stdscr, items, selected_idx, current_path, offset, scanning):
+def draw_menu(stdscr, items, selected_idx, current_path, offset, scanning, tokenizer_info):
     stdscr.clear()
     height, width = stdscr.getmaxyx()
     header = f"Tokdu - {current_path} (Enter: open, Backspace: up, q: quit)"
     stdscr.addstr(0, 0, header.ljust(width), curses.A_REVERSE)
-    max_items = height - 2
+
+    # Display tokenizer info on the second line
+    tokenizer_line = f"Using: {tokenizer_info}".ljust(width)
+    stdscr.addstr(1, 0, tokenizer_line, curses.A_BOLD)
+
+    max_items = height - 3  # Reduce by one more line for tokenizer info
 
     # If scanning is in progress, show an indicator.
     if scanning:
         scan_msg = "Scanning directory... please wait."
-        stdscr.addstr(1, 0, scan_msg.ljust(width), curses.A_BLINK)
+        stdscr.addstr(2, 0, scan_msg.ljust(width), curses.A_BLINK)
 
     if items is None:
         stdscr.refresh()
@@ -438,15 +451,18 @@ def draw_menu(stdscr, items, selected_idx, current_path, offset, scanning):
         # Ensure the line does not exceed the available width.
         line = line[:width-1]
         if idx + offset == selected_idx:
-            stdscr.addstr(idx + 1, 0, line.ljust(width), curses.A_STANDOUT)
+            stdscr.addstr(idx + 2, 0, line.ljust(width), curses.A_STANDOUT)  # Start from line 2 now
         else:
-            stdscr.addstr(idx + 1, 0, line.ljust(width))
+            stdscr.addstr(idx + 2, 0, line.ljust(width))
     stdscr.refresh()
     return offset
 
-def tui(stdscr, start_path, encoder, repo_root):
+def tui(stdscr, start_path, encoder_and_info, repo_root):
     global curses_initialized
     curses_initialized = True
+
+    # Unpack encoder and info
+    encoder, tokenizer_info = encoder_and_info
 
     curses.curs_set(0)
     stdscr.nodelay(True)  # Enable non-blocking input.
@@ -474,12 +490,12 @@ def tui(stdscr, start_path, encoder, repo_root):
         scanning = items is None
 
         height, width = stdscr.getmaxyx()
-        max_items = height - 2
-        offset = draw_menu(stdscr, items, selected_idx, current_path, offset, scanning)
+        max_items = height - 3  # Reduced by one for tokenizer info
+        offset = draw_menu(stdscr, items, selected_idx, current_path, offset, scanning, tokenizer_info)
 
         # Display root boundary message if present
         if root_message:
-            message_y = height - 1 if height > 2 else 0
+            message_y = height - 1 if height > 3 else 0
             stdscr.addstr(message_y, 0, root_message[:width-1], curses.A_BOLD)
             stdscr.refresh()
             # Auto-clear message after a brief period
@@ -665,11 +681,11 @@ def main():
 
             # Initialize encoder and repo_root before starting curses
             try:
-                encoder = get_encoder(encoding_name, model_name, tokenizer_type)
+                encoder_and_info = get_encoder(encoding_name, model_name, tokenizer_type)
                 repo_root = find_git_root(directory)
 
                 # Now start curses with the pre-initialized encoder
-                curses.wrapper(lambda stdscr: tui(stdscr, directory, encoder, repo_root))
+                curses.wrapper(lambda stdscr: tui(stdscr, directory, encoder_and_info, repo_root))
             except ImportError as e:
                 # This captures the import errors without trying to use curses
                 print(str(e))
